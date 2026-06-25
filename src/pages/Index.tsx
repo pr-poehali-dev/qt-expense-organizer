@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import {
   Expense, Category, loadExpenses, saveExpenses, loadCategories,
   saveCategories, formatMoney, uid, CATEGORY_COLORS,
+  exportCSV, exportJSON, importJSON, DEFAULT_CATEGORIES,
 } from '@/lib/expenses';
 
 type Tab = 'add' | 'history' | 'reports' | 'categories' | 'budget';
@@ -46,8 +47,54 @@ export default function Index() {
     [expenses]
   );
 
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<null | { text: string; action: () => void }>(null);
+  const [aboutOpen, setAboutOpen] = useState(false);
+
+  const handleImport = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'application/json,.json';
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      try {
+        const res = await importJSON(file);
+        setExpenses(res.expenses);
+        setCategories(res.categories);
+        toast.success('Данные импортированы', { description: `Записей: ${res.expenses.length}` });
+      } catch (err) {
+        toast.error((err as Error).message);
+      }
+    };
+    input.click();
+  };
+
+  const MENUS: Record<string, { label: string; icon: string; onClick: () => void; danger?: boolean }[]> = {
+    'Файл': [
+      { label: 'Экспорт в CSV (Excel)', icon: 'FileSpreadsheet', onClick: () => { exportCSV(expenses, categories); toast.success('Файл CSV сохранён'); } },
+      { label: 'Сохранить копию (JSON)', icon: 'Download', onClick: () => { exportJSON(expenses, categories); toast.success('Резервная копия сохранена'); } },
+      { label: 'Загрузить из копии', icon: 'Upload', onClick: handleImport },
+    ],
+    'Правка': [
+      { label: 'Сбросить категории', icon: 'RotateCcw', onClick: () => setConfirm({ text: 'Вернуть стандартный набор категорий? Ваши категории будут заменены.', action: () => { setCategories(DEFAULT_CATEGORIES); toast.success('Категории сброшены'); } }) },
+      { label: 'Удалить все расходы', icon: 'Eraser', danger: true, onClick: () => setConfirm({ text: 'Удалить все записи расходов? Это действие необратимо.', action: () => { setExpenses([]); toast.success('Все расходы удалены'); } }) },
+      { label: 'Полный сброс данных', icon: 'Trash2', danger: true, onClick: () => setConfirm({ text: 'Полностью очистить приложение? Удалятся все расходы и категории.', action: () => { setExpenses([]); setCategories(DEFAULT_CATEGORIES); toast.success('Данные очищены'); } }) },
+    ],
+    'Вид': [
+      { label: 'Добавить расход', icon: 'PlusCircle', onClick: () => setTab('add') },
+      { label: 'История', icon: 'List', onClick: () => setTab('history') },
+      { label: 'Отчёты', icon: 'PieChart', onClick: () => setTab('reports') },
+      { label: 'Категории', icon: 'Tags', onClick: () => setTab('categories') },
+      { label: 'Бюджет', icon: 'Wallet', onClick: () => setTab('budget') },
+    ],
+    'Справка': [
+      { label: 'О программе', icon: 'Info', onClick: () => setAboutOpen(true) },
+    ],
+  };
+
   return (
-    <div className="min-h-screen flex flex-col bg-muted/40 font-sans text-foreground">
+    <div className="min-h-screen flex flex-col bg-muted/40 font-sans text-foreground" onClick={() => setOpenMenu(null)}>
       {/* Menu bar */}
       <div className="flex items-center gap-1 bg-card border-b border-border px-2 py-1 text-sm select-none">
         <div className="flex items-center gap-2 px-2 font-semibold text-primary">
@@ -55,14 +102,33 @@ export default function Index() {
           <span>Органайзер расходов</span>
         </div>
         <span className="w-px h-4 bg-border mx-1" />
-        {['Файл', 'Правка', 'Вид', 'Справка'].map((m) => (
-          <button
-            key={m}
-            onClick={() => toast(`Меню «${m}»`, { description: 'Раздел в разработке' })}
-            className="px-2 py-0.5 rounded hover:bg-accent text-muted-foreground hover:text-accent-foreground transition-colors"
-          >
-            {m}
-          </button>
+        {Object.keys(MENUS).map((m) => (
+          <div key={m} className="relative" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setOpenMenu(openMenu === m ? null : m)}
+              className={`px-2 py-0.5 rounded transition-colors ${
+                openMenu === m ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+              }`}
+            >
+              {m}
+            </button>
+            {openMenu === m && (
+              <div className="absolute left-0 top-full mt-1 z-50 min-w-[220px] bg-card border border-border rounded-md shadow-lg py-1 animate-fade-in">
+                {MENUS[m].map((item) => (
+                  <button
+                    key={item.label}
+                    onClick={() => { setOpenMenu(null); item.onClick(); }}
+                    className={`flex items-center gap-2.5 w-full text-left px-3 py-1.5 text-sm transition-colors hover:bg-accent ${
+                      item.danger ? 'text-destructive hover:bg-destructive/10' : 'text-foreground'
+                    }`}
+                  >
+                    <Icon name={item.icon} size={15} />
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         ))}
       </div>
 
@@ -118,6 +184,44 @@ export default function Index() {
           Записей: {expenses.length} · За {curMonth()}: <b className="text-foreground">{formatMoney(monthTotal)}</b>
         </span>
       </div>
+
+      {confirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30 p-4 animate-fade-in" onClick={() => setConfirm(null)}>
+          <div className="bg-card border border-border rounded-md shadow-xl w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+            <header className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-secondary/40">
+              <Icon name="TriangleAlert" size={16} className="text-destructive" />
+              <h3 className="text-sm font-semibold">Подтверждение</h3>
+            </header>
+            <p className="p-4 text-sm text-muted-foreground">{confirm.text}</p>
+            <footer className="flex justify-end gap-2 px-4 py-3 border-t border-border bg-secondary/20">
+              <Btn variant="flat" onClick={() => setConfirm(null)}>Отмена</Btn>
+              <Btn variant="danger" onClick={() => { confirm.action(); setConfirm(null); }}>
+                <Icon name="Check" size={15} /> Подтвердить
+              </Btn>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {aboutOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30 p-4 animate-fade-in" onClick={() => setAboutOpen(false)}>
+          <div className="bg-card border border-border rounded-md shadow-xl w-full max-w-sm text-center" onClick={(e) => e.stopPropagation()}>
+            <div className="p-6">
+              <span className="inline-flex w-14 h-14 rounded-lg bg-primary text-primary-foreground items-center justify-center mb-3">
+                <Icon name="Coins" size={28} />
+              </span>
+              <h3 className="text-base font-semibold">Органайзер расходов</h3>
+              <p className="text-xs text-muted-foreground mt-1">Версия 1.0 · Qt-style</p>
+              <p className="text-sm text-muted-foreground mt-4">
+                Учёт расходов по категориям, отчёты, диаграммы и контроль бюджета. Все данные хранятся в вашем браузере.
+              </p>
+            </div>
+            <footer className="flex justify-center px-4 py-3 border-t border-border bg-secondary/20">
+              <Btn onClick={() => setAboutOpen(false)}><Icon name="Check" size={15} /> Закрыть</Btn>
+            </footer>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

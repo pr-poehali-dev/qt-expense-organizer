@@ -70,3 +70,64 @@ export function formatMoney(n: number): string {
 export function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
+
+function downloadFile(name: string, content: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export function exportCSV(expenses: Expense[], categories: Category[]) {
+  const catName: Record<string, string> = {};
+  categories.forEach((c) => (catName[c.id] = c.name));
+  const rows = [['Дата', 'Категория', 'Сумма', 'Комментарий']];
+  [...expenses]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .forEach((e) => {
+      rows.push([
+        e.date,
+        catName[e.categoryId] ?? 'Без категории',
+        String(e.amount),
+        (e.note || '').replace(/"/g, '""'),
+      ]);
+    });
+  const csv = '\uFEFF' + rows.map((r) => r.map((c) => `"${c}"`).join(';')).join('\n');
+  downloadFile(`расходы_${today()}.csv`, csv, 'text/csv;charset=utf-8');
+}
+
+export function exportJSON(expenses: Expense[], categories: Category[]) {
+  const data = JSON.stringify({ version: 1, expenses, categories }, null, 2);
+  downloadFile(`backup_${today()}.json`, data, 'application/json');
+}
+
+export interface ImportResult {
+  expenses: Expense[];
+  categories: Category[];
+}
+
+export function importJSON(file: File): Promise<ImportResult> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(String(reader.result));
+        if (!Array.isArray(data.expenses) || !Array.isArray(data.categories)) {
+          throw new Error('bad');
+        }
+        resolve({ expenses: data.expenses, categories: data.categories });
+      } catch {
+        reject(new Error('Неверный формат файла'));
+      }
+    };
+    reader.onerror = () => reject(new Error('Не удалось прочитать файл'));
+    reader.readAsText(file);
+  });
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
